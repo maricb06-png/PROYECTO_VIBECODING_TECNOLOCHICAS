@@ -10,22 +10,6 @@ Muchas apps de productividad se sienten como un jefe exigente, con listas infini
 
 ---
 
-## 📸 Capturas
-
-| Mi espacio | Mis tareas |
-| --- | --- |
-| ![Mi espacio](docs/screenshots/mi-espacio.png) | ![Mis tareas](docs/screenshots/tareas.png) |
-
-| Calendario | Hábitos |
-| --- | --- |
-| ![Calendario](docs/screenshots/calendario.png) | ![Hábitos](docs/screenshots/habitos.png) |
-
-| Estadísticas | Notas |
-| --- | --- |
-| ![Estadísticas](docs/screenshots/estadisticas.png) | ![Notas](docs/screenshots/notas.png) |
-
----
-
 ## ✨ Funciones
 
 ### 🏡 Mi espacio
