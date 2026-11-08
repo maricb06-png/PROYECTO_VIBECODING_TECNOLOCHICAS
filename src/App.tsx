@@ -2,10 +2,17 @@ import { useEffect, useState, type FormEvent } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import {
   ArrowRight, BarChart3, Bell, CalendarDays, Check, CheckCircle2, ChevronLeft, ChevronRight,
-  Clock3, Feather, Filter, Flower2, Heart, Home, Leaf, ListChecks, Menu, MoreHorizontal,
+  Clock3, Feather, Filter, Flower2, GraduationCap, Heart, Home, Leaf, ListChecks, Menu, MoreHorizontal,
   Pencil, Pin, Plus, Search, Sparkles, Sprout, StickyNote, Target, Trash2, X, Zap,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { localDate, formatShortDate, getCurrentWeekDates, getWeekKey, weekdayLetter } from '@/lib/dates';
+import { courseXp, isEndingSoon, isStale, type Course, type CourseInput } from '@/lib/courses';
+import PageIntro from '@/components/PageIntro';
+import StatCard from '@/components/StatCard';
+import ConfirmModal from '@/components/ConfirmModal';
+import CoursesView from '@/components/courses/CoursesView';
+import CategoryHoursCard from '@/components/courses/CategoryHoursCard';
 
 type TaskStatus = 'pendiente' | 'en progreso' | 'completada';
 type Priority = 'baja' | 'media' | 'alta' | 'urgente';
@@ -15,7 +22,7 @@ type HabitCompletion = { id: string; habit_id: string; completed_on: string };
 type Note = { id: string; title: string; body: string; category: string; color: string; pinned: boolean; created_at: string };
 type Profile = { id: string; display_name: string; avatar: string; avatar_color: string; xp: number; level: number };
 type Reflection = { id: string; week_key: string; achieved: string; difficult: string; learned: string; improve: string; priority: string };
-type View = 'inicio' | 'tareas' | 'calendario' | 'habitos' | 'estadisticas' | 'notas';
+type View = 'inicio' | 'tareas' | 'calendario' | 'habitos' | 'cursos' | 'estadisticas' | 'notas';
 
 const today = localDate();
 const levelNames = ['Pequeño brote', 'Plantita', 'Jardinero', 'Explorador del bosque', 'Guardián del bosque'];
@@ -25,6 +32,12 @@ const gardenThresholds = [0, 15, 45, 90, 150, 240];
 const categories = ['Todas', 'Estudio', 'Trabajo', 'Proyectos personales', 'Salud y bienestar', 'Ejercicio', 'Finanzas', 'Hogar', 'Vida social', 'Creatividad', 'Otros'];
 const priorityLabel: Record<Priority, string> = { baja: 'Baja', media: 'Media', alta: 'Alta', urgente: 'Urgente' };
 const priorityTone: Record<Priority, string> = { baja: 'sage', media: 'butter', alta: 'rose', urgente: 'forest' };
+const viewPaths: Record<View, string> = { inicio: '/', tareas: '/tareas', calendario: '/calendario', habitos: '/habitos', cursos: '/cursos', estadisticas: '/estadisticas', notas: '/notas' };
+
+function viewFromPath(pathname: string): View {
+  const path = pathname.replace(/\/+$/, '') || '/';
+  return (Object.keys(viewPaths) as View[]).find((view) => viewPaths[view] === path) ?? 'inicio';
+}
 
 function AuthScreen() {
   const [mode, setMode] = useState<'signup' | 'login'>('signup');
@@ -280,7 +293,6 @@ function App() {
   </div>;
 }
 
-function PageIntro({ eyebrow, title, description, action }: { eyebrow: string; title: string; description: string; action?: React.ReactNode }) { return <div className="page-intro"><div><div className="eyebrow"><Leaf size={14} />{eyebrow}</div><h1>{title}</h1><p>{description}</p></div>{action}</div>; }
 
 function Dashboard({ tasks, habits, completedToday, dailyProgress, overdue, greeting, firstName, onNavigate, onToggle, onNewTask }: { tasks: Task[]; habits: Habit[]; completedToday: number; dailyProgress: number; overdue: number; greeting: string; firstName: string; onNavigate: (view: View) => void; onToggle: (task: Task) => void; onNewTask: () => void }) {
   const openTasks = tasks.filter((task) => task.status !== 'completada');
@@ -294,7 +306,6 @@ function Dashboard({ tasks, habits, completedToday, dailyProgress, overdue, gree
   </div>;
 }
 
-function StatCard({ icon, value, label, tone, progress }: { icon: React.ReactNode; value: string | number; label: string; tone: string; progress?: number }) { return <div className={`stat-card ${tone}`}><div className="stat-icon">{icon}</div><div><strong>{value}</strong><span>{label}</span></div>{progress !== undefined && <div className="ring-progress" style={{ '--progress': `${progress * 3.6}deg` } as React.CSSProperties}><i>{progress}%</i></div>}</div>; }
 function PanelHeading({ icon, title, action }: { icon: React.ReactNode; title: string; action?: React.ReactNode }) { return <div className="panel-heading"><h2><span>{icon}</span>{title}</h2>{action}</div>; }
 function EmptyState({ text }: { text: string }) { return <div className="empty-state"><Flower2 size={22} /><p>{text}</p></div>; }
 function TaskRow({ task, onToggle }: { task: Task; onToggle: () => void }) { return <div className="task-row"><button className={`check-task ${task.status === 'completada' ? 'checked' : ''}`} onClick={onToggle} aria-label="Completar tarea">{task.status === 'completada' && <Check size={13} />}</button><div className="task-info"><strong>{task.title}</strong><span><i className={`category-dot ${task.category === 'Trabajo' ? 'work' : task.category === 'Estudio' ? 'study' : 'personal'}`} />{task.category} · {task.due_date ? formatShortDate(task.due_date) : 'Sin fecha'} · {task.estimated_minutes} min</span></div><span className={`priority-tag ${priorityTone[task.priority]}`}>{priorityLabel[task.priority]}</span></div>; }
@@ -335,10 +346,6 @@ function NoteModal({ note, onClose, onSave }: { note: Note | null; onClose: () =
   return <div className="modal-backdrop" onMouseDown={onClose}><div className="task-modal" onMouseDown={(event) => event.stopPropagation()}><div className="modal-heading"><div><span className="eyebrow"><StickyNote size={14} />{note ? 'Editar nota' : 'Nueva nota'}</span><h2>{note ? 'Ajusta tu idea.' : 'Guarda una idea.'}</h2></div><button className="close-button" onClick={onClose}><X size={18} /></button></div><label>Título<input value={title} onChange={(event) => setTitle(event.target.value)} autoFocus /></label><label>Contenido<textarea value={body} onChange={(event) => setBody(event.target.value)} rows={5} /></label><div className="form-grid"><label>Categoría<select value={category} onChange={(event) => setCategory(event.target.value)}><option>Ideas</option><option>Recordatorio</option><option>Inspiración</option><option>Personal</option></select></label><label>Color<div className="note-color-options">{['#F2E4A8', '#DCE8D6', '#F3D5CE', '#C7D8DF', '#E6D5BD'].map((option) => <button type="button" key={option} aria-label={`Elegir color ${option}`} className={color === option ? 'selected' : ''} style={{ background: option }} onClick={() => setColor(option)} />)}</div></label></div><div className="modal-actions"><button type="button" className="secondary-button" onClick={onClose}>Cancelar</button><button type="button" className="primary-button" disabled={!title.trim()} onClick={() => onSave({ title: title.trim(), body, category, color, pinned: note?.pinned ?? false }, note)}>Guardar nota</button></div></div></div>;
 }
 
-function ConfirmModal({ title, description, onClose, onConfirm }: { title: string; description: string; onClose: () => void; onConfirm: () => void }) {
-  return <div className="modal-backdrop" onMouseDown={onClose}><div className="task-modal confirm-modal" onMouseDown={(event) => event.stopPropagation()}><div className="modal-heading"><div><span className="eyebrow"><Trash2 size={14} />Confirmación</span><h2>{title}</h2></div><button className="close-button" onClick={onClose}><X size={18} /></button></div><p>{description}</p><div className="modal-actions"><button type="button" className="secondary-button" onClick={onClose}>Cancelar</button><button type="button" className="danger-button" onClick={onConfirm}>Eliminar nota</button></div></div></div>;
-}
-
 function ProfileModal({ profile, onClose, onSave }: { profile: Profile | null; onClose: () => void; onSave: (displayName: string, avatarColor: string) => void }) {
   const [displayName, setDisplayName] = useState(profile?.display_name ?? 'Mara');
   const [avatarColor, setAvatarColor] = useState(profile?.avatar_color ?? '#8FA58A');
@@ -354,13 +361,8 @@ function ReflectionModal({ reflection, onClose, onSave }: { reflection: Reflecti
 
 function TaskModal({ task, onClose, onSaved }: { task: Task | null; onClose: () => void; onSaved: (task: Task, mode: 'new' | 'edit') => void }) { const [title, setTitle] = useState(task?.title ?? ''); const [description, setDescription] = useState(task?.description ?? ''); const [category, setCategory] = useState(task?.category ?? 'Otros'); const [priority, setPriority] = useState<Priority>(task?.priority ?? 'media'); const [dueDate, setDueDate] = useState(task?.due_date ?? today); const [minutes, setMinutes] = useState(String(task?.estimated_minutes ?? 30)); const [status, setStatus] = useState<TaskStatus>(task?.status ?? 'pendiente'); const [saving, setSaving] = useState(false); async function save(event: FormEvent) { event.preventDefault(); if (!title.trim()) return; setSaving(true); const payload = { title: title.trim(), description, category, priority, due_date: dueDate || null, estimated_minutes: Number(minutes) || 30, status, completed_at: status === 'completada' ? new Date().toISOString() : null }; const response = task ? await supabase.from('cozy_tasks').update(payload).eq('id', task.id).select().maybeSingle() : await supabase.from('cozy_tasks').insert(payload).select().maybeSingle(); setSaving(false); if (response.error || !response.data) return; onSaved(response.data as Task, task ? 'edit' : 'new'); } return <div className="modal-backdrop" onMouseDown={onClose}><div className="task-modal" onMouseDown={(event) => event.stopPropagation()}><div className="modal-heading"><div><span className="eyebrow"><Sparkles size={14} />{task ? 'Editar tarea' : 'Nueva aventura'}</span><h2>{task ? 'Ajusta los detalles' : '¿Qué quieres cuidar hoy?'}</h2></div><button className="close-button" onClick={onClose}><X size={18} /></button></div><form onSubmit={save}><label>Nombre de la tarea<input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Por ejemplo, preparar la presentación" autoFocus /></label><label>Descripción <textarea value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Un detalle para ayudarte a empezar..." rows={3} /></label><div className="form-grid"><label>Categoría<select value={category} onChange={(event) => setCategory(event.target.value)}>{categories.slice(1).map((item) => <option key={item}>{item}</option>)}</select></label><label>Prioridad<select value={priority} onChange={(event) => setPriority(event.target.value as Priority)}>{Object.keys(priorityLabel).map((item) => <option key={item} value={item}>{priorityLabel[item as Priority]}</option>)}</select></label><label>Fecha límite<input type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} /></label><label>Tiempo estimado<select value={minutes} onChange={(event) => setMinutes(event.target.value)}>{['15', '30', '45', '60', '90', '120'].map((item) => <option key={item} value={item}>{item} minutos</option>)}</select></label></div><label>Estado<select value={status} onChange={(event) => setStatus(event.target.value as TaskStatus)}><option value="pendiente">Pendiente</option><option value="en progreso">En progreso</option><option value="completada">Completada</option></select></label><div className="modal-actions"><button type="button" className="secondary-button" onClick={onClose}>Cancelar</button><button type="submit" className="primary-button" disabled={saving}>{saving ? 'Guardando...' : task ? 'Guardar cambios' : 'Añadir a mi espacio'}</button></div></form></div></div>; }
 
-function localDate(date = new Date()) { const year = date.getFullYear(); const month = String(date.getMonth() + 1).padStart(2, '0'); const day = String(date.getDate()).padStart(2, '0'); return `${year}-${month}-${day}`; }
 function taskCompletedOn(task: Task) { return task.completed_at ? localDate(new Date(task.completed_at)) : task.status === 'completada' ? task.due_date : null; }
-function getWeekKey(date = new Date()) { const local = new Date(date.getFullYear(), date.getMonth(), date.getDate()); const day = local.getDay() || 7; local.setDate(local.getDate() - day + 1); return localDate(local); }
-function getCurrentWeekDates() { const start = new Date(`${getWeekKey()}T12:00:00`); return Array.from({ length: 7 }, (_, index) => { const date = new Date(start); date.setDate(start.getDate() + index); return localDate(date); }); }
-function weekdayLetter(value: string) { return ['D', 'L', 'M', 'X', 'J', 'V', 'S'][new Date(`${value}T12:00:00`).getDay()]; }
 function xpForMinutes(minutes: number) { return minutes <= 30 ? 5 : minutes <= 60 ? 10 : 20; }
 function getGardenStage(xp: number) { return gardenThresholds.reduce((stage, threshold, index) => xp >= threshold ? index : stage, 0); }
-function formatShortDate(value: string) { return new Date(`${value}T12:00:00`).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' }); }
 
 export default App;
